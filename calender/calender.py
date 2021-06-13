@@ -1,100 +1,122 @@
-from redbot.core import commands
+import uuid
+from redbot.core import commands, Config
 from discord import File, TextChannel
-from os import path, getcwd
 from datetime import datetime, timedelta
 from dateutil import tz
-import io
 import ics
+import io
+from enum import Enum
+import typing
 
-# Format the ics module expects the dates to be in
-date_format = '%Y-%m-%d %H:%M:%S'
-
-
-def getGuildName(guild):
-    return str(guild.id)
-
-
-def createEmptyCalender(name):
-    c = ics.Calendar()
-    saveCalender(name, c)
-
-
-def getFilePath(name):
-    return getcwd()+"/calender/calenders/"+str(name)+".ics"
-
-
-def saveCalender(name, c):
-    with open(getFilePath(name), 'w+') as f:
-        f.write(str(c))
-
-
-def openCalender(name):
-    return ics.Calendar((open(getFilePath(name), "r")).read())
-
-
+timeFormat = "%Y-%m-%d %H:%M"
+icsFormat =  "%Y-%m-%d %H:%M:%S"
 class Calender(commands.Cog):
     """Calender cog to make and manage events"""
 
     def __init__(self, bot):
         self.bot = bot
-
-    # @commands.command()
-    # async def hello(self, ctx):
-    #     c = Calendar()
-    #     with open('my.ics', 'w') as f:
-    #         f.write(str(c))
-    #     file = File(fp = (open('my.ics', "rb")), spoiler = False)
-    #     await ctx.send("world", file=file)
-
-    @commands.command()
-    async def createCalender(self, ctx):
-
-        if(ctx.guild == None):
-            await ctx.send("Command should be run in a guild")
-            return
-        cName = getGuildName(ctx.guild)
-
-        if(path.isfile(getFilePath(cName))):
-            await ctx.send("There is already a calender for this guild, to overwrite it use [p]forceCreateCalender")
-            return
-        createEmptyCalender(cName)
-        await ctx.send("Calender created")
+        self.config = Config.get_conf(self, identifier=176359585513209856)
+        default_guild = {
+            "events": {},
+            "serverTimezone": "UTC",
+            "additionalTimezones": []
+        }
+        default_user = {
+            "timezone": "UTC",
+            "events": {}
+        }
+        self.config.register_guild(**default_guild)
+        self.config.register_user(**default_user)
 
     @commands.command()
-    async def forceCreateCalender(self, ctx):
-        if(ctx.guild == None):
-            await ctx.send("Command should be run in a guild")
-            return
-        cName = getGuildName(ctx.guild)
-        createEmptyCalender(cName)
-        await ctx.send("Calender created")
+    async def createEvent(self, ctx, name, time, date, duration:typing.Optional[int]=1, channel: TextChannel = None):
+        """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> duration=[hours] channel=[#channel] \n Used to create a new event that will be added to the guild calendar. An invite will be returned so it can be added to your personal agenda."""
 
-    @commands.command()
-    async def getServerCalenderFile(self, ctx):
-        file = File(fp=(open(getFilePath(ctx.guild.id), "rb")),
-                    filename=ctx.guild.name + "_calender.ics", spoiler=False)
-        await ctx.send("Here's the whole server calender", file=file)
-
-    @commands.command(attrs=["name", "time", "date", "channel"])
-    async def createEvent(self, ctx, name, time, date, channel: TextChannel = None):
-        """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> [channel] """
-        cal = openCalender(ctx.guild.id)
-        event = ics.Event()
-
+        event = Event()
         event.name = name
-        start_str = date + " " + time+":00"
-        start_dt = datetime.strptime(start_str, date_format).replace(
-            tzinfo=tz.gettz('Europe/Brussels'))
-        start_dt = start_dt.astimezone(tz.tzutc())
-
-        event.begin = start_dt.strftime(date_format)
-        event.end = (start_dt + timedelta(hours=1)).strftime(date_format)
-        cal.events.add(event)
-        saveCalender(ctx.guild.id, cal)
-        file = io.StringIO(str(ics.Calendar(events=[event])))
+        event.startDateTime = datetime.strptime(date+" "+time, timeFormat)
+        event.endDateTime = event.startDateTime + timedelta(hours=duration)
+        event.organizer = Attendee(ctx.author.id)
+        event.timeZone = await self.config.user(ctx.author).timezone()
+        async with self.config.user(ctx.author).events() as events:
+            events[event.id] = event.toJsonSerializable()
+        async with self.config.guild(ctx.guild).events() as events:
+            events[event.id] = event.toJsonSerializable()
+        print(event.toJsonSerializable())
+        file = io.StringIO(str(ics.Calendar(events=[event.toICSEvent()])))
         if channel != None:
-            print(channel)
             await channel.send("Event created", file=File(fp=file, filename=event.name+".ics"))
-
         else:
             await ctx.send("Event created", file=File(fp=file, filename=event.name+".ics"))
+
+    @commands.command()
+    async def setPersonalTimezone(self, ctx, timezone):
+        """Set your personal timezone"""
+        if(tz.gettz(timezone) != None):
+            await self.config.user(ctx.author).timezone.set(timezone)
+            await ctx.send("The time zone of " + ctx.author.mention + " is now set to: " + timezone)
+        else:
+            await ctx.send("That time zone or time zone format is not supported")
+
+
+class Status(Enum):
+    COMMING = "y"
+    MAYBE = "m"
+    DECLINED = "n"
+
+class Attendee():
+    userIdL: int
+    status: Status = Status.COMMING
+
+    def __init__(self, userId):
+        self.userId = userId
+
+    def setStatus(self, status: Status):
+        self.status = status
+        return self
+
+    def __repr__(self):
+        items = ("%s = %r" % (k, v) for k, v in self.__dict__.items())
+        return "<%s: {%s}>" % (self.__class__.__name__, ', '.join(items))
+
+class Event():
+    id: str
+    name: str
+    startDateTime: datetime
+    endDateTime: datetime
+    timeZone: str
+    organizer: Attendee
+    attendees: [Attendee] = []
+
+    def __init__(self):
+        self.id = uuid.uuid4().hex
+
+    def toJsonSerializable(self):
+        result = dict(self.__dict__)
+        result["startDateTime"] = self.startDateTime.strftime(timeFormat)
+        result["endDateTime"] = self.endDateTime.strftime(timeFormat)
+        result["organizer"] = self.organizer.__dict__
+        result["attendees"] = [attendee.__dict__ for attendee in self.attendees]
+        return result
+
+    def fromJsonSerializable(self, input:dict):
+        input["startDateTime"] = datetime.strptime(result["startDateTime"], timeFormat)
+        input["endDateTime"] = datetime.strptime(result["endDateTime"], timeFormat)
+
+
+    
+
+    def toICSEvent(self):
+        event = ics.Event()
+        event.name = self.name
+        start_dt = self.startDateTime.replace(tzinfo=tz.gettz(self.timeZone))
+        start_dt = start_dt.astimezone(tz.tzutc())
+        event.begin = start_dt.strftime(icsFormat)
+        end_dt = self.endDateTime.replace(tzinfo=tz.gettz(self.timeZone))
+        end_dt = end_dt.astimezone(tz.tzutc())
+        event.end = end_dt.strftime(icsFormat)
+        return event
+
+
+
+
