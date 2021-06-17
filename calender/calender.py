@@ -6,28 +6,13 @@ from datetime import datetime, timedelta
 from dateutil import tz
 import ics
 import io
-from enum import Enum
 import typing
+import asyncio
 
 timeFormat = "%Y-%m-%d %H:%M"
 icsFormat = "%Y-%m-%d %H:%M:%S"
 eventCreatedMessage = "Event \"{}\" was created.\n At this moment there are {} that have accepted"
 
-async def createEventEmbed(event, statusses, bot:discord.Client) -> discord.Embed:
-    embed = discord.Embed()
-    users = {attendee.userId: await bot.fetch_user(attendee.userId) for attendee in event.attendees}
-    seperator = "\n"
-    for status in statusses:
-        message = seperator.join([users[attendee.userId].display_name for attendee in event.attendees if attendee.status == status])
-        if message == "":
-            message = "no-one"
-        embed.add_field(name = status, value = message, inline = True)
-
-    embed.title = event.name
-    embed.set_footer(text="made by the great Matthanol")
-    embed.set_author(name="Cogger")
-    print(embed.to_dict())
-    return embed
 
 
 def getMessageUid(message):
@@ -106,9 +91,34 @@ class Event():
         event.end = end_dt.strftime(icsFormat)
         return event
 
+async def createEventEmbed(event:Event, statusses, bot:discord.Client) -> discord.Embed:
+    embed = discord.Embed()
+    embed.add_field(name="time and date", value="Start: {} \n Stop: {}".format(event.startDateTime.strftime("%H:%M %Y-%m-%d"), event.endDateTime.strftime("%H:%M %Y-%m-%d")), inline=False)
+    users = {attendee.userId: await bot.fetch_user(attendee.userId) for attendee in event.attendees}
+    seperator = "\n"
+    for status in statusses:
+        usersWithStatus = [users[attendee.userId].display_name for attendee in event.attendees if attendee.status == status]
+        message = seperator.join(usersWithStatus)
+        if message == "":
+            message = 	u"\u200B"
+        embed.add_field(name = " {} {} ({})".format(statusses[status],status, len(usersWithStatus)) , value = message, inline = True)
+        
+
+    embed.title = event.name
+    embed.set_footer(text="made by the great Matthanol")
+    embed.set_author(name="Cogger")
+    print(embed.to_dict())
+    return embed
+
 
 class Calender(commands.Cog):
     """Calender cog to make and manage events"""
+
+    # caching stuff
+    reactions = {}
+    channels = {}
+
+
 
     def __init__(self, bot):
         self.bot = bot
@@ -136,7 +146,7 @@ class Calender(commands.Cog):
         await ctx.send("guild db reset")
 
     @commands.command()
-    async def createEvent(self, ctx:discord.abc.Messageable, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
+    async def createEvent(self, ctx:discord.ext.commands.Context, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
         """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> duration=[hours] channel=[#channel] \n Used to create a new event that will be added to the guild calendar. An invite will be returned so it can be added to your personal agenda."""
         event:Event = Event()
         event.name = name
@@ -149,17 +159,16 @@ class Calender(commands.Cog):
         async with self.config.guild(ctx.guild).events() as events:
             events[event.id] = event.toJsonSerializable()
         print(event.toJsonSerializable())
+        reactions = await self.getReactionsFromGuild(ctx.guild.id) 
         file = io.StringIO(str(ics.Calendar(events=[event.toICSEvent()])))
         message:discord.Message
-        messageText = eventCreatedMessage.format(event.name, str(len(event.attendees)))
-        embed = await createEventEmbed(event, await self.config.guild(ctx.guild).statusReactions(), self.bot)
-        if channel != None:
-            message = await channel.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
-        else:
-            message = await ctx.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
-        reactions = await self.config.guild(ctx.guild).statusReactions()    
+        embed = await createEventEmbed(event, reactions, self.bot)
+        if channel == None:
+            channel = ctx.channel
+        message = await channel.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
+        
         for status in reactions:
-            await message.add_reaction(reactions[status])
+            asyncio.create_task(message.add_reaction(reactions[status]))
         
         async with self.config.guild(ctx.guild).calenderMessages() as messages:
             messages[getMessageUid(message)] = {"event": event.id}
@@ -175,9 +184,11 @@ class Calender(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         if payload.user_id == self.bot.user.id:
             return
-        channel: TextChannel = await self.bot.fetch_channel(payload.channel_id)
+        channel: TextChannel = await self.getChannel(payload.channel_id)
         message: PartialMessage = channel.get_partial_message(
             payload.message_id)
         configMessage = (await self.config.guild_from_id(payload.guild_id).calenderMessages()).get(getMessageUid(message))
@@ -185,21 +196,20 @@ class Calender(commands.Cog):
             return
         event = Event().fromJsonSerializable(
             (await self.config.guild_from_id(payload.guild_id).events())[configMessage["event"]])
-        reactions = await self.config.guild_from_id(payload.guild_id).statusReactions()
+        reactions = await self.getReactionsFromGuild(payload.guild_id)
         foundAttendee = False
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 for status in reactions:
                     if reactions[status] != str(payload.emoji):
                         # TODO Make sure the bot has permission manage messages, if not, ask for it
-                        await message.remove_reaction(reactions[status], payload.member) 
+                        asyncio.create_task(message.remove_reaction(reactions[status], payload.member) )
                 existingAttendee.setStatus(get_key_from_value(reactions, str(payload.emoji)))
                 foundAttendee = True
         if not(foundAttendee):
             newAttendee = Attendee().setId(payload.user_id).setStatus(get_key_from_value(reactions, str(payload.emoji)))
             event.attendees.append(newAttendee)
-        newMessageText = eventCreatedMessage.format(event.name, len([attendee for attendee in event.attendees if attendee.status=="accepted"]))
-        await message.edit(embed= await createEventEmbed(event, reactions, self.bot))
+        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
         
@@ -227,3 +237,12 @@ class Calender(commands.Cog):
             message = "no messages saved"
         await ctx.send(message)
 
+    async def getReactionsFromGuild(self, guildId):
+        if self.reactions.get(guildId) == None:
+            self.reactions[guildId] = await self.config.guild_from_id(guildId).statusReactions()
+        return self.reactions[guildId]
+    
+    async def getChannel(self, channelId):
+        if self.channels.get(channelId) == None:
+            self.channels[channelId] = await self.bot.fetch_channel(channelId)
+        return self.channels[channelId]
