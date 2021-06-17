@@ -53,7 +53,7 @@ class Event():
     name: str
     startDateTime: datetime
     endDateTime: datetime
-    timeZone: str
+    timezone: str
     organizer: Attendee
     attendees: [Attendee] = []
 
@@ -83,17 +83,25 @@ class Event():
     def toICSEvent(self):
         event = ics.Event()
         event.name = self.name
-        start_dt = self.startDateTime.replace(tzinfo=tz.gettz(self.timeZone))
+        start_dt = self.startDateTime.replace(tzinfo=tz.gettz(self.timezone))
         start_dt = start_dt.astimezone(tz.tzutc())
         event.begin = start_dt.strftime(icsFormat)
-        end_dt = self.endDateTime.replace(tzinfo=tz.gettz(self.timeZone))
+        end_dt = self.endDateTime.replace(tzinfo=tz.gettz(self.timezone))
         end_dt = end_dt.astimezone(tz.tzutc())
         event.end = end_dt.strftime(icsFormat)
         return event
 
-async def createEventEmbed(event:Event, statusses, bot:discord.Client) -> discord.Embed:
+async def createEventEmbed(event:Event, statusses, bot:discord.Client, timezones) -> discord.Embed:
     embed = discord.Embed()
-    embed.add_field(name="time and date", value="Start: {} \n Stop: {}".format(event.startDateTime.strftime("%H:%M %Y-%m-%d"), event.endDateTime.strftime("%H:%M %Y-%m-%d")), inline=False)
+    if(event.timezone not in timezones):
+        timezones.append(event.timezone)
+    
+    otherTimezoneString = ""
+    for timezone in timezones:
+        otherTimezoneString += "{}: {} until {} \n".format(timezone, event.startDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"), event.endDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"))
+    embed.add_field(name="When?", value=otherTimezoneString, inline=False)
+
+    
     users = {attendee.userId: await bot.fetch_user(attendee.userId) for attendee in event.attendees}
     seperator = "\n"
     for status in statusses:
@@ -107,7 +115,6 @@ async def createEventEmbed(event:Event, statusses, bot:discord.Client) -> discor
     embed.title = event.name
     embed.set_footer(text="made by the great Matthanol")
     embed.set_author(name="Cogger")
-    print(embed.to_dict())
     return embed
 
 
@@ -140,10 +147,11 @@ class Calender(commands.Cog):
         self.config.register_guild(**default_guild)
         self.config.register_user(**default_user)
 
-    @commands.command()
-    async def resetDB(self, ctx):
-        await self.config.clear_all_guilds()
-        await ctx.send("guild db reset")
+    # @commands.command()
+    # async def resetDB(self, ctx):
+    #     """[p]resetDB resets the database for your guild"""
+    #     await self.config.clear_all_guilds()
+    #     await ctx.send("guild db reset")
 
     @commands.command()
     async def createEvent(self, ctx:discord.ext.commands.Context, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
@@ -153,16 +161,15 @@ class Calender(commands.Cog):
         event.startDateTime = datetime.strptime(date+" "+time, timeFormat)
         event.endDateTime = event.startDateTime + timedelta(hours=duration)
         event.organizer = Attendee().setId(ctx.author.id)
-        event.timeZone = await self.config.user(ctx.author).timezone()
+        event.timezone = await self.config.user(ctx.author).timezone()
         async with self.config.user(ctx.author).events() as events:
             events[event.id] = event.toJsonSerializable()
         async with self.config.guild(ctx.guild).events() as events:
             events[event.id] = event.toJsonSerializable()
-        print(event.toJsonSerializable())
         reactions = await self.getReactionsFromGuild(ctx.guild.id) 
         file = io.StringIO(str(ics.Calendar(events=[event.toICSEvent()])))
         message:discord.Message
-        embed = await createEventEmbed(event, reactions, self.bot)
+        embed = await createEventEmbed(event, reactions, self.bot, await self.config.guild(ctx.guild).additionalTimezones())
         if channel == None:
             channel = ctx.channel
         message = await channel.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
@@ -194,13 +201,34 @@ class Calender(commands.Cog):
             await ctx.send("The time zone of " + ctx.author.mention + " is now set to: " + timezone)
         else:
             await ctx.send("That time zone or time zone format is not supported")
+    
+    @commands.command()
+    async def addTimezone(self, ctx, timezone):
+        """Set your personal timezone"""
+        if(tz.gettz(timezone) != None):
+            async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
+                timezones.append(timezone)
+            await ctx.send("Another timezone was added")
+        else:
+            await ctx.send("That time zone or time zone format is not supported")
+    
+    @commands.command()
+    async def removeTimezone(self, ctx, timezone):
+        """Set your personal timezone"""
+        if timezones.index(timezone) != None:
+            async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
+                timezones.pop(timezones.index(timezone))
+            await ctx.send("timezone was removed")
+        else:
+            await ctx.send("Couldn't find timezone in additionalTimezones")
+
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         if not(str(payload.emoji) in reactions.values()):
             return
-        if payload.user_id == self.bot.user.id:
+        if payload.member.id == self.bot.user.id:
             return
         channel: TextChannel = await self.getChannel(payload.channel_id)
         message: PartialMessage = channel.get_partial_message(
@@ -223,7 +251,7 @@ class Calender(commands.Cog):
         if not(foundAttendee):
             newAttendee = Attendee().setId(payload.user_id).setStatus(get_key_from_value(reactions, str(payload.emoji)))
             event.attendees.append(newAttendee)
-        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot)))
+        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot, await self.config.guild_from_id(payload.guild_id).additionalTimezones())))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
         
@@ -232,7 +260,7 @@ class Calender(commands.Cog):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         if not(str(payload.emoji) in reactions.values()):
             return
-        if payload.user_id == self.bot.user.id:
+        if payload.member.id == self.bot.user.id:
             return
         channel: TextChannel = await self.getChannel(payload.channel_id)
         message: PartialMessage = channel.get_partial_message(
@@ -246,7 +274,7 @@ class Calender(commands.Cog):
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 del event.attendees[event.attendees.index(existingAttendee)]
-        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot)))
+        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot, await self.config.guild_from_id(payload.guild_id).additionalTimezones())))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
 
