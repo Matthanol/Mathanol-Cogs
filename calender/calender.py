@@ -153,7 +153,12 @@ class Calender(commands.Cog):
     #     await self.config.clear_all_guilds()
     #     await ctx.send("guild db reset")
 
-    @commands.command()
+    @commands.group(pass_context=True)
+    async def calendar(self, ctx):
+        if ctx.invoked_subcommand is None:
+            await ctx.send('Invalid sub command passed...')
+
+    @calendar.command()
     async def createEvent(self, ctx:discord.ext.commands.Context, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
         """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> duration=[hours] channel=[#channel] \n Used to create a new event that will be added to the guild calendar. An invite will be returned so it can be added to your personal agenda."""
         event:Event = Event()
@@ -180,7 +185,7 @@ class Calender(commands.Cog):
         async with self.config.guild(ctx.guild).calenderMessages() as messages:
             messages[getMessageUid(message)] = {"event": event.id}
 
-    @commands.command()
+    @calendar.command()
     async def deleteEvent(self, ctx):
         reference = await ctx.fetch_message(ctx.message.reference.message_id)
         async with self.config.guild(ctx.guild).calenderMessages() as messages:
@@ -193,7 +198,7 @@ class Calender(commands.Cog):
            del events[eventId]
         
 
-    @commands.command()
+    @calendar.command()
     async def setPersonalTimezone(self, ctx, timezone):
         """Set your personal timezone"""
         if(tz.gettz(timezone) != None):
@@ -202,7 +207,7 @@ class Calender(commands.Cog):
         else:
             await ctx.send("That time zone or time zone format is not supported")
     
-    @commands.command()
+    @calendar.command()
     async def addTimezone(self, ctx, timezone):
         """Set your personal timezone"""
         if(tz.gettz(timezone) != None):
@@ -212,7 +217,7 @@ class Calender(commands.Cog):
         else:
             await ctx.send("That time zone or time zone format is not supported")
     
-    @commands.command()
+    @calendar.command()
     async def removeTimezone(self, ctx, timezone):
         """Set your personal timezone"""
         if timezones.index(timezone) != None:
@@ -240,6 +245,9 @@ class Calender(commands.Cog):
             (await self.config.guild_from_id(payload.guild_id).events())[configMessage["event"]])
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         foundAttendee = False
+        permissions = self.bot.user.permissions_in(message.channel)
+        if not(permissions.manage_channels):
+            await channel.send("I need manage channels permission")
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 for status in reactions:
@@ -279,27 +287,28 @@ class Calender(commands.Cog):
             events[event.id] = event.toJsonSerializable()
 
 
-    @commands.command()
+    @calendar.command()
     async def getAllEvents(self, ctx):
         message = ""
         events = await self.config.guild(ctx.guild).events()
         for eventId in events:
             event = Event().fromJsonSerializable(events[eventId])
-            message += str(events[eventId])+ "\n"
+            print(events[eventId])
+            message += "{}: {} until {} {}".format(event.name, str(event.startDateTime),str(event.endDateTime), event.timezone )+ "\n"
         if len(events) == 0:
             message = "no events in calender"
         await ctx.send(message)
     
-    @commands.command()
-    async def getAllMessages(self, ctx):
-        message = ""
-        messages = await self.config.guild(ctx.guild).calenderMessages()
-        for messageId in messages:
-            calMessage = messages[messageId]
-            message += messageId + " "+ str(calMessage) + "\n"
-        if len(messages) == 0:
-            message = "no messages saved"
-        await ctx.send(message)
+    # @calendar.command()
+    # async def getAllMessages(self, ctx):
+    #     message = ""
+    #     messages = await self.config.guild(ctx.guild).calenderMessages()
+    #     for messageId in messages:
+    #         calMessage = messages[messageId]
+    #         message += messageId + " "+ str(calMessage) + "\n"
+    #     if len(messages) == 0:
+    #         message = "no messages saved"
+    #     await ctx.send(message)
 
     
 
