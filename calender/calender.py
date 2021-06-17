@@ -16,7 +16,7 @@ eventCreatedMessage = "Event \"{}\" was created.\n At this moment there are {} t
 
 
 def getMessageUid(message):
-    return str(message.channel.id + message.id)
+    return str(message.channel.id) + str(message.id)
 
 def get_key_from_value(d, val):
     keys = [k for k, v in d.items() if v == val]
@@ -174,6 +174,19 @@ class Calender(commands.Cog):
             messages[getMessageUid(message)] = {"event": event.id}
 
     @commands.command()
+    async def deleteEvent(self, ctx):
+        reference = await ctx.fetch_message(ctx.message.reference.message_id)
+        async with self.config.guild(ctx.guild).calenderMessages() as messages:
+            messageUID = getMessageUid(reference)
+            eventId = messages[messageUID]["event"]
+            del messages[messageUID]
+        asyncio.create_task( reference.delete())
+        asyncio.create_task( ctx.message.delete())
+        async with self.config.guild(ctx.guild).events() as events:
+           del events[eventId]
+        
+
+    @commands.command()
     async def setPersonalTimezone(self, ctx, timezone):
         """Set your personal timezone"""
         if(tz.gettz(timezone) != None):
@@ -184,8 +197,9 @@ class Calender(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        reactions = await self.getReactionsFromGuild(payload.guild_id)
+        if not(str(payload.emoji) in reactions.values()):
+            return
         if payload.user_id == self.bot.user.id:
             return
         channel: TextChannel = await self.getChannel(payload.channel_id)
@@ -236,6 +250,8 @@ class Calender(commands.Cog):
         if len(messages) == 0:
             message = "no messages saved"
         await ctx.send(message)
+
+    
 
     async def getReactionsFromGuild(self, guildId):
         if self.reactions.get(guildId) == None:
