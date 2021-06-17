@@ -227,6 +227,28 @@ class Calender(commands.Cog):
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
         
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        reactions = await self.getReactionsFromGuild(payload.guild_id)
+        if not(str(payload.emoji) in reactions.values()):
+            return
+        if payload.user_id == self.bot.user.id:
+            return
+        channel: TextChannel = await self.getChannel(payload.channel_id)
+        message: PartialMessage = channel.get_partial_message(
+            payload.message_id)
+        configMessage = (await self.config.guild_from_id(payload.guild_id).calenderMessages()).get(getMessageUid(message))
+        if(configMessage == None):
+            return
+        event = Event().fromJsonSerializable(
+            (await self.config.guild_from_id(payload.guild_id).events())[configMessage["event"]])
+        reactions = await self.getReactionsFromGuild(payload.guild_id)
+        for existingAttendee in event.attendees:
+            if existingAttendee.userId == payload.user_id:
+                del event.attendees[event.attendees.index(existingAttendee)]
+        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot)))
+        async with self.config.guild_from_id(payload.guild_id).events() as events:
+            events[event.id] = event.toJsonSerializable()
 
 
     @commands.command()
