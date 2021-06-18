@@ -105,7 +105,7 @@ async def createEventEmbed(event:Event, statusses, bot:discord.Client, timezones
     users = {attendee.userId: await bot.fetch_user(attendee.userId) for attendee in event.attendees}
     seperator = "\n"
     for status in statusses:
-        usersWithStatus = [users[attendee.userId].display_name for attendee in event.attendees if attendee.status == status]
+        usersWithStatus = [users[attendee.userId].mention for attendee in event.attendees if attendee.status == status]
         message = seperator.join(usersWithStatus)
         if message == "":
             message = 	u"\u200B"
