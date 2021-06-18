@@ -245,7 +245,7 @@ class Calender(commands.Cog):
             (await self.config.guild_from_id(payload.guild_id).events())[configMessage["event"]])
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         foundAttendee = False
-        permissions = self.bot.user.permissions_in(message.channel)
+        # permissions = self.bot.user.permissions_in(message.channel)
         # if not(permissions.manage_channels):
         #     await channel.send("I need manage channels permission")
         for existingAttendee in event.attendees:
@@ -268,11 +268,15 @@ class Calender(commands.Cog):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         if not(str(payload.emoji) in reactions.values()):
             return
-        if payload.member.id == self.bot.user.id:
-            return
+        
         channel: TextChannel = await self.getChannel(payload.channel_id)
         message: PartialMessage = channel.get_partial_message(
             payload.message_id)
+        for reaction in (await message.fetch()).reactions:
+            async for member in reaction.users():
+                if member.id == payload.user_id:
+                    return
+                    
         configMessage = (await self.config.guild_from_id(payload.guild_id).calenderMessages()).get(getMessageUid(message))
         if(configMessage == None):
             return
