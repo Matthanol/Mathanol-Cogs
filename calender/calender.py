@@ -246,8 +246,8 @@ class Calender(commands.Cog):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         foundAttendee = False
         permissions = self.bot.user.permissions_in(message.channel)
-        if not(permissions.manage_channels):
-            await channel.send("I need manage channels permission")
+        # if not(permissions.manage_channels):
+        #     await channel.send("I need manage channels permission")
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 for status in reactions:
