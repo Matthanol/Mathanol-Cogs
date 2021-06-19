@@ -220,12 +220,13 @@ class Calender(commands.Cog):
     @calendar.command()
     async def removeTimezone(self, ctx, timezone):
         """Set your personal timezone"""
-        if timezones.index(timezone) != None:
-            async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
+        async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
+            if timezones.index(timezone) != None:
+                
                 timezones.pop(timezones.index(timezone))
-            await ctx.send("timezone was removed")
-        else:
-            await ctx.send("Couldn't find timezone in additionalTimezones")
+                await ctx.send("timezone was removed")
+            else:
+                await ctx.send("Couldn't find timezone in additionalTimezones")
 
 
     @commands.Cog.listener()
