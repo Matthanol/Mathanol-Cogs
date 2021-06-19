@@ -91,31 +91,7 @@ class Event():
         event.end = end_dt.strftime(icsFormat)
         return event
 
-async def createEventEmbed(event:Event, statusses, bot:discord.Client, timezones) -> discord.Embed:
-    embed = discord.Embed()
-    if(event.timezone not in timezones):
-        timezones.append(event.timezone)
-    
-    otherTimezoneString = ""
-    for timezone in timezones:
-        otherTimezoneString += "{}: {} until {} \n".format(timezone, event.startDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"), event.endDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"))
-    embed.add_field(name="When?", value=otherTimezoneString, inline=False)
 
-    
-    users = {attendee.userId: await bot.fetch_user(attendee.userId) for attendee in event.attendees}
-    seperator = "\n"
-    for status in statusses:
-        usersWithStatus = [users[attendee.userId].mention for attendee in event.attendees if attendee.status == status]
-        message = seperator.join(usersWithStatus)
-        if message == "":
-            message = 	u"\u200B"
-        embed.add_field(name = " {} {} ({})".format(statusses[status],status, len(usersWithStatus)) , value = message, inline = True)
-        
-
-    embed.title = event.name
-    embed.set_footer(text="made by the great Matthanol")
-    embed.set_author(name="Cogger")
-    return embed
 
 
 class Calender(commands.Cog):
@@ -141,17 +117,18 @@ class Calender(commands.Cog):
             
         }
         default_user = {
-            "timezone": "UTC",
+            "timezone": None,
             "events": {}
         }
         self.config.register_guild(**default_guild)
         self.config.register_user(**default_user)
 
-    # @commands.command()
-    # async def resetDB(self, ctx):
-    #     """[p]resetDB resets the database for your guild"""
-    #     await self.config.clear_all_guilds()
-    #     await ctx.send("guild db reset")
+    @commands.command()
+    # @checks.is_owner()
+    async def resetDB(self, ctx):
+        """[p]resetDB resets the database for your guild"""
+        await self.config.clear_all_guilds()
+        await ctx.send("guild db reset")
 
     @commands.group(pass_context=True)
     async def calendar(self, ctx):
@@ -174,7 +151,7 @@ class Calender(commands.Cog):
         reactions = await self.getReactionsFromGuild(ctx.guild.id) 
         file = io.StringIO(str(ics.Calendar(events=[event.toICSEvent()])))
         message:discord.Message
-        embed = await createEventEmbed(event, reactions, self.bot, await self.config.guild(ctx.guild).additionalTimezones())
+        embed = await self.createEventEmbed(ctx.channel,ctx.guild , event)
         if channel == None:
             channel = ctx.channel
         message = await channel.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
@@ -260,7 +237,7 @@ class Calender(commands.Cog):
         if not(foundAttendee):
             newAttendee = Attendee().setId(payload.user_id).setStatus(get_key_from_value(reactions, str(payload.emoji)))
             event.attendees.append(newAttendee)
-        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot, await self.config.guild_from_id(payload.guild_id).additionalTimezones())))
+        asyncio.create_task(message.edit(embed= await self.createEventEmbed(channel,channel.guild, event)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
         
@@ -287,7 +264,7 @@ class Calender(commands.Cog):
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 del event.attendees[event.attendees.index(existingAttendee)]
-        asyncio.create_task(message.edit(embed= await createEventEmbed(event, reactions, self.bot, await self.config.guild_from_id(payload.guild_id).additionalTimezones())))
+        asyncio.create_task(message.edit(embed= await self.createEventEmbed( channel, channel.guild, event)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
 
@@ -326,3 +303,34 @@ class Calender(commands.Cog):
         if self.channels.get(channelId) == None:
             self.channels[channelId] = await self.bot.fetch_channel(channelId)
         return self.channels[channelId]
+    
+    async def createEventEmbed(self,guild, channel, event:Event) -> discord.Embed:
+        embed = discord.Embed()
+        timezones =[]
+        for member in channel.members:
+            timezone = await self.config.user(member).timezone()
+            if timezone != None:
+                timezones.append(timezone)
+
+        
+        otherTimezoneString = ""
+        for timezone in timezones:
+            otherTimezoneString += "{}: {} until {} \n".format(timezone, event.startDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"), event.endDateTime.astimezone(tz.gettz(timezone)).strftime("**%H:%M** %Y-%m-%d"))
+        embed.add_field(name="When?", value=otherTimezoneString, inline=False)
+
+        
+        users = {attendee.userId: await self.bot.fetch_user(attendee.userId) for attendee in event.attendees}
+        seperator = "\n"
+        statusses = await self.config.guild(guild).statusReactions()
+        for status in statusses:
+            usersWithStatus = [users[attendee.userId].mention for attendee in event.attendees if attendee.status == status]
+            message = seperator.join(usersWithStatus)
+            if message == "":
+                message = 	u"\u200B"
+            embed.add_field(name = " {} {} ({})".format(statusses[status],status, len(usersWithStatus)) , value = message, inline = True)
+            
+
+        embed.title = event.name
+        embed.set_footer(text="made by the great Matthanol")
+        embed.set_author(name="Cogger")
+        return embed
