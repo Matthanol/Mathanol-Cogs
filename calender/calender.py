@@ -152,7 +152,7 @@ class Calender(commands.Cog):
         reactions = await self.getReactionsFromGuild(ctx.guild.id) 
         file = io.StringIO(str(ics.Calendar(events=[event.toICSEvent()])))
         message:discord.Message
-        embed = await self.createEventEmbed(ctx.channel,ctx.guild , event)
+        embed = await self.createEventEmbed(ctx.guild ,ctx.channel, event)
         if channel == None:
             channel = ctx.channel
         message = await channel.send(embed=embed, file=File(fp=file, filename=event.name+".ics"))
@@ -238,7 +238,7 @@ class Calender(commands.Cog):
         if not(foundAttendee):
             newAttendee = Attendee().setId(payload.user_id).setStatus(get_key_from_value(reactions, str(payload.emoji)))
             event.attendees.append(newAttendee)
-        asyncio.create_task(message.edit(embed= await self.createEventEmbed(channel,channel.guild, event)))
+        asyncio.create_task(message.edit(embed= await self.createEventEmbed(channel.guild, channel,  event)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
         
@@ -265,7 +265,7 @@ class Calender(commands.Cog):
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 del event.attendees[event.attendees.index(existingAttendee)]
-        asyncio.create_task(message.edit(embed= await self.createEventEmbed( channel, channel.guild, event)))
+        asyncio.create_task(message.edit(embed= await self.createEventEmbed( channel.guild, channel,  event)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
 
