@@ -8,6 +8,7 @@ import ics
 import io
 import typing
 import asyncio
+import logging
 
 timeFormat = "%Y-%m-%d %H:%M"
 icsFormat = "%Y-%m-%d %H:%M:%S"
@@ -308,7 +309,7 @@ class Calender(commands.Cog):
         embed = discord.Embed()
         timezones =[]
         for member in channel.members:
-            debug(member.name)
+            logging.info(member.name)
             timezone = await self.config.user(member).timezone()
             if timezone != None:
                 timezones.append(timezone)
