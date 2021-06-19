@@ -309,7 +309,6 @@ class Calender(commands.Cog):
         embed = discord.Embed()
         timezones =[]
         for member in channel.members:
-            logging.info(member.name)
             timezone = await self.config.user(member).timezone()
             if timezone != None:
                 timezones.append(timezone)
