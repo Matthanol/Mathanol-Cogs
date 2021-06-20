@@ -196,8 +196,7 @@ class Calender(commands.Cog):
         await ctx.send("The time zone of " + ctx.author.mention + " is removed")
 
 
-    @commands.Cog.listener(name="reaction_add")
-    @commands.bot_has_permissions(manage_messages=True)
+    @commands.Cog.listener(name="on_raw_reaction_add")
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         if not(str(payload.emoji) in reactions.values()):
@@ -216,10 +215,13 @@ class Calender(commands.Cog):
         foundAttendee = False
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
-                for status in reactions:
-                    if reactions[status] != str(payload.emoji):
-                        asyncio.create_task(message.remove_reaction(reactions[status], payload.member) )
-                existingAttendee.setStatus(get_key_from_value(reactions, str(payload.emoji)))
+                if not(channel.permissions_for(channel.guild.get_member(self.bot.user.id)).manage_messages):
+                    asyncio.create_task(channel.send("Cannot automatically remove old reaction without \"manage messages\" permission"))
+                else:
+                    for status in reactions:
+                        if reactions[status] != str(payload.emoji):
+                            asyncio.create_task(message.remove_reaction(reactions[status], payload.member) )
+                    existingAttendee.setStatus(get_key_from_value(reactions, str(payload.emoji)))
                 foundAttendee = True
         if not(foundAttendee):
             newAttendee = Attendee().setId(payload.user_id).setStatus(get_key_from_value(reactions, str(payload.emoji)))
@@ -228,11 +230,7 @@ class Calender(commands.Cog):
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
     
-    @reaction_add.error
-    async def on_raw_reaction_add_Error(self, ctx, error):
-        if isinstance(error, MissingPermissions):
-            await ctx.send("I just tried to remove an old reaction from te event, but it seems I'm not allowed to. Could you give me the permission to 'manage messages'?")
-        
+  
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
@@ -298,7 +296,7 @@ class Calender(commands.Cog):
 
     async def getUserTimezone(self, user):
         if self.userTimezones.get(user.id) == None:
-            self.userTimezones.put(user.id, await self.config.user(user).timezone())
+            self.userTimezones[user.id] = await self.config.user(user).timezone()
         return self.userTimezones.get(user.id)
     
     async def createEventEmbed(self,guild, channel, event:Event) -> discord.Embed:
@@ -328,6 +326,7 @@ class Calender(commands.Cog):
             
 
         embed.title = event.name
-        embed.set_footer(text="If your timezone is not visible above, please use _{}calendar setPersonalTimezone_ to set your timezone and when a response is added or removed your timezone will appear".format(self.bot.get_valid_prefixes(guild)[0]))
+        footerText = "If your timezone is not visible above, please use _[p]calendar setPersonalTimezone_ to set your timezone and when a response is added or removed your timezone will appear"
+        embed.set_footer(text=footerText)
         embed.set_author(name="Cogger")
         return embed
