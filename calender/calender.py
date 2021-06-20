@@ -328,6 +328,6 @@ class Calender(commands.Cog):
             
 
         embed.title = event.name
-        embed.set_footer(text="If your timezone is not visible above, please use _{}calendar setPersonalTimezone_ to set your timezone and when a response is added or removed your timezone will appear".format(self.bot.get_valid_prefixes(guild)[0])
+        embed.set_footer(text="If your timezone is not visible above, please use _{}calendar setPersonalTimezone_ to set your timezone and when a response is added or removed your timezone will appear".format(self.bot.get_valid_prefixes(guild)[0]))
         embed.set_author(name="Cogger")
         return embed
