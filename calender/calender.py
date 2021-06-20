@@ -126,7 +126,7 @@ class Calender(commands.Cog):
         self.config.register_user(**default_user)
 
     @commands.command()
-    @commands.check_any(commands.is_owner(), is_guild_owner())
+    @commands.has_permissions(manage_guild=True)
     async def resetDB(self, ctx):
         """[p]resetDB resets the database for your guild"""
         await self.config.clear_all_guilds()
