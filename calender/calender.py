@@ -196,7 +196,7 @@ class Calender(commands.Cog):
         await ctx.send("The time zone of " + ctx.author.mention + " is removed")
 
 
-    @commands.Cog.listener()
+    @commands.Cog.listener(name="reaction_add")
     @commands.bot_has_permissions(manage_messages=True)
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
@@ -228,7 +228,7 @@ class Calender(commands.Cog):
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
     
-    @on_raw_reaction_add.error
+    @reaction_add.error
     async def on_raw_reaction_add_Error(self, ctx, error):
         if isinstance(error, MissingPermissions):
             await ctx.send("I just tried to remove an old reaction from te event, but it seems I'm not allowed to. Could you give me the permission to 'manage messages'?")
