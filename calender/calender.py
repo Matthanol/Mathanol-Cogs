@@ -1,6 +1,7 @@
 import uuid
 from redbot.core import commands, Config
 from discord import File, TextChannel, PartialMessage
+from discord.ext.commands import MissingPermissions
 import discord
 from datetime import datetime, timedelta
 from dateutil import tz
@@ -9,6 +10,7 @@ import io
 import typing
 import asyncio
 import logging
+
 
 timeFormat = "%Y-%m-%d %H:%M"
 icsFormat = "%Y-%m-%d %H:%M:%S"
@@ -101,6 +103,7 @@ class Calender(commands.Cog):
     # caching stuff
     reactions = {}
     channels = {}
+    userTimezones = {}
 
 
 
@@ -109,8 +112,6 @@ class Calender(commands.Cog):
         self.config = Config.get_conf(self, identifier=176359585513209856)
         default_guild = {
             "events": {},
-            "serverTimezone": "UTC",
-            "additionalTimezones": [],
             "calenderMessages": {},
             "statusReactions" : {   "accepted": "✅",
                                     "maybe":"🤷",
@@ -125,7 +126,7 @@ class Calender(commands.Cog):
         self.config.register_user(**default_user)
 
     @commands.command()
-    # @checks.is_owner()
+    @commands.check_any(commands.is_owner(), is_guild_owner())
     async def resetDB(self, ctx):
         """[p]resetDB resets the database for your guild"""
         await self.config.clear_all_guilds()
@@ -139,12 +140,14 @@ class Calender(commands.Cog):
     @calendar.command()
     async def createEvent(self, ctx:discord.ext.commands.Context, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
         """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> duration=[hours] channel=[#channel] \n Used to create a new event that will be added to the guild calendar. An invite will be returned so it can be added to your personal agenda."""
+        if await self.getUserTimezone(self) == None:
+            ctx.send("Please configure a timezone with {}calendar setPersonalTimezone before you create an event".format(ctx.clean_prefix()))
         event:Event = Event()
         event.name = name
         event.startDateTime = datetime.strptime(date+" "+time, timeFormat)
         event.endDateTime = event.startDateTime + timedelta(hours=duration)
         event.organizer = Attendee().setId(ctx.author.id)
-        event.timezone = await self.config.user(ctx.author).timezone()
+        event.timezone = await self.getUserTimezone(ctx.author)
         async with self.config.user(ctx.author).events() as events:
             events[event.id] = event.toJsonSerializable()
         async with self.config.guild(ctx.guild).events() as events:
@@ -186,28 +189,15 @@ class Calender(commands.Cog):
             await ctx.send("That time zone or time zone format is not supported")
     
     @calendar.command()
-    async def addTimezone(self, ctx, timezone):
+    async def removePersonalTimezone(self, ctx, timezone):
         """Set your personal timezone"""
-        if(tz.gettz(timezone) != None):
-            async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
-                timezones.append(timezone)
-            await ctx.send("Another timezone was added")
-        else:
-            await ctx.send("That time zone or time zone format is not supported")
-    
-    @calendar.command()
-    async def removeTimezone(self, ctx, timezone):
-        """Set your personal timezone"""
-        async with self.config.guild(ctx.guild).additionalTimezones() as timezones:
-            if timezones.index(timezone) != None:
-                
-                timezones.pop(timezones.index(timezone))
-                await ctx.send("timezone was removed")
-            else:
-                await ctx.send("Couldn't find timezone in additionalTimezones")
+
+        await self.config.user(ctx.author).timezone.set(timezone)
+        await ctx.send("The time zone of " + ctx.author.mention + " is removed")
 
 
     @commands.Cog.listener()
+    @commands.bot_has_permissions(manage_messages=True)
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         if not(str(payload.emoji) in reactions.values()):
@@ -224,14 +214,10 @@ class Calender(commands.Cog):
             (await self.config.guild_from_id(payload.guild_id).events())[configMessage["event"]])
         reactions = await self.getReactionsFromGuild(payload.guild_id)
         foundAttendee = False
-        # permissions = self.bot.user.permissions_in(message.channel)
-        # if not(permissions.manage_channels):
-        #     await channel.send("I need manage channels permission")
         for existingAttendee in event.attendees:
             if existingAttendee.userId == payload.user_id:
                 for status in reactions:
                     if reactions[status] != str(payload.emoji):
-                        # TODO Make sure the bot has permission manage messages, if not, ask for it
                         asyncio.create_task(message.remove_reaction(reactions[status], payload.member) )
                 existingAttendee.setStatus(get_key_from_value(reactions, str(payload.emoji)))
                 foundAttendee = True
@@ -241,6 +227,11 @@ class Calender(commands.Cog):
         asyncio.create_task(message.edit(embed= await self.createEventEmbed(channel.guild, channel,  event)))
         async with self.config.guild_from_id(payload.guild_id).events() as events:
             events[event.id] = event.toJsonSerializable()
+    
+    @on_raw_reaction_add.error
+    async def on_raw_reaction_add_Error(self, ctx, error):
+        if isinstance(error, MissingPermissions):
+            await ctx.send("I just tried to remove an old reaction from te event, but it seems I'm not allowed to. Could you give me the permission to 'manage messages'?")
         
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
@@ -304,12 +295,17 @@ class Calender(commands.Cog):
         if self.channels.get(channelId) == None:
             self.channels[channelId] = await self.bot.fetch_channel(channelId)
         return self.channels[channelId]
+
+    async def getUserTimezone(self, user):
+        if self.userTimezones.get(user.id) = None:
+            self.userTimezones.put(user.id, await self.config.user(user).timezone())
+        return self.userTimezones.get(user.id)
     
     async def createEventEmbed(self,guild, channel, event:Event) -> discord.Embed:
         embed = discord.Embed()
         timezones =[]
         for member in channel.members:
-            timezone = await self.config.user(member).timezone()
+            timezone = await self.getUserTimezone(member)
             if timezone != None:
                 timezones.append(timezone)
 
@@ -332,6 +328,6 @@ class Calender(commands.Cog):
             
 
         embed.title = event.name
-        embed.set_footer(text="made by the great Matthanol")
+        embed.set_footer(text="If your timezone is not visible above, please use _{}calendar setPersonalTimezone_ to set your timezone and when a response is added or removed your timezone will appear".format(self.bot.get_valid_prefixes(guild)[0])
         embed.set_author(name="Cogger")
         return embed

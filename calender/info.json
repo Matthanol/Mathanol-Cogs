@@ -1,3 +1,10 @@
-{"requirements":[
+{
+    "author":["Matthias \"Matthanol\" Bruynooghe"],
+    "description":"A cog to make events and see who attends.",
+    "install_msg": "So, you installed the calendar cog, you can find the commands by using [p]help calendar",
+    "short": "Calendar cog",
+    "requirements":[
     "ics"
-]}
+    ],
+    "tags":["calendar","event"]
+}
