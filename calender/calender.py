@@ -297,7 +297,7 @@ class Calender(commands.Cog):
         return self.channels[channelId]
 
     async def getUserTimezone(self, user):
-        if self.userTimezones.get(user.id) = None:
+        if self.userTimezones.get(user.id) == None:
             self.userTimezones.put(user.id, await self.config.user(user).timezone())
         return self.userTimezones.get(user.id)
     
