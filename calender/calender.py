@@ -140,7 +140,7 @@ class Calender(commands.Cog):
     @calendar.command()
     async def createEvent(self, ctx:discord.ext.commands.Context, name, time, date, duration: typing.Optional[int] = 1, channel: TextChannel = None):
         """[p]createEvent <eventName> <hh:mm> <yyyy-mm-dd> duration=[hours] channel=[#channel] \n Used to create a new event that will be added to the guild calendar. An invite will be returned so it can be added to your personal agenda."""
-        if await self.getUserTimezone(self) == None:
+        if await self.getUserTimezone(ctx.author) == None:
             ctx.send("Please configure a timezone with {}calendar setPersonalTimezone before you create an event".format(ctx.clean_prefix()))
         event:Event = Event()
         event.name = name
